@@ -712,3 +712,76 @@ header h1 {
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===================== 모바일 반응형 ===================== */
+@media (max-width: 640px) {
+  main { padding: 12px 14px 64px; }
+
+  /* 상단 바: 고정 해제 -> 흐름에 배치(제목과 겹침 방지) */
+  .top-bar {
+    position: static;
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 10px 14px 0;
+    box-shadow: none;
+  }
+  .top-btn { padding: 8px 12px; font-size: 0.8rem; }
+  .user-label { font-size: 0.8rem; order: -1; margin-right: auto; } /* 이름은 왼쪽으로 */
+
+  header h1 { font-size: 1.45rem; line-height: 1.25; }
+  .sub { font-size: 0.9rem; margin-bottom: 20px; }
+
+  /* 입력 폼: 세로 적층 (좁은 화면에서 버튼 안 눌림 방지) */
+  #form { flex-direction: column; gap: 8px; }
+  #url { font-size: 0.95rem; padding: 13px 14px; }
+  #submit { padding: 13px; width: 100%; }
+
+  /* 메타/배지 */
+  .meta { padding: 14px; }
+  .meta h2 { font-size: 1.15rem; }
+  .badge { margin-left: 0; margin-right: 6px; margin-top: 4px; }
+
+  /* 플레이어: 좁은 화면에선 볼륨/음소거 숨김(기기 볼륨 사용) -> 시크바 공간 확보 */
+  .player { padding: 12px; }
+  .aplayer { gap: 8px; }
+  .aplayer-vol, .aplayer-icon { display: none; }
+  .aplayer-play { width: 40px; height: 40px; } /* 터치 영역 */
+
+  /* 가사 */
+  .line { padding: 12px; }
+  .line .original { font-size: 1.06rem; }
+  .line .reading, .line .translation { font-size: 0.9rem; }
+
+  /* 툴바: 좁은 화면에선 좌측 정렬로 자연스럽게 줄바꿈 */
+  .toolbar-spacer { display: none; }
+
+  /* 버튼 터치 영역 확대 */
+  .copy-btn, .seg-btn, .offset-btn, .uact {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .offset-control input[type="range"] { min-width: 90px; }
+
+  /* 사이드 패널 거의 전체 폭 */
+  .library-panel { width: min(440px, 94vw); }
+  .user-row { flex-wrap: wrap; }
+  .user-actions { flex-wrap: wrap; }
+
+  /* 맨 위로 버튼 */
+  .scroll-top { right: 16px; bottom: 16px; width: 42px; height: 42px; font-size: 1.2rem; }
+
+  /* 로그인 카드 */
+  .auth-card { padding: 26px 20px; }
+  .auth-title { font-size: 1.15rem; }
+}
+
+@media (max-width: 380px) {
+  header h1 { font-size: 1.3rem; }
+  .seg-btn { padding-left: 9px; padding-right: 9px; font-size: 0.8rem; }
+  .aplayer-time { min-width: 30px; font-size: 0.74rem; }
+}
+
+/* 터치 시 파란 하이라이트 제거 */
+button, .line, .library-item { -webkit-tap-highlight-color: transparent; }
