@@ -7,6 +7,9 @@ yt-dlp==2024.12.13
 pydantic==2.10.4
 beautifulsoup4==4.12.3
 requests==2.32.3
+numpy>=1.26,<3   # 자동 오프셋(onset 분석)용
+
+
 
 # 일본어 -> 한글 독음 변환
 #   fugashi(+unidic): 형태소 분석으로 조사 は->わ 등 문법·문맥 한자 읽기 정확
