@@ -13,6 +13,7 @@ from ..config import (
     ADMIN_PASSWORD,
     ADMIN_USERNAME,
     USERS_FILE,
+    WEAK_ADMIN_PASSWORDS,
     get_session_secret,
 )
 
@@ -105,7 +106,12 @@ def seed_admin() -> None:
     """
     if count_admins() > 0:
         return
-    if not ADMIN_PASSWORD:
+    if not ADMIN_PASSWORD or ADMIN_PASSWORD.strip().lower() in WEAK_ADMIN_PASSWORDS:
+        # 약한/기본 비밀번호로는 관리자 자동 생성을 거부(운영 시 강한 값 필수).
+        print(
+            "[auth] ADMIN_PASSWORD 가 비어있거나 약해서 관리자 부트스트랩을 건너뜁니다. "
+            "환경변수에 강한 ADMIN_PASSWORD 를 설정하세요."
+        )
         return
     existing = get_user(ADMIN_USERNAME)
     if existing is None:

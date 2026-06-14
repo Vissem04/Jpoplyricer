@@ -1,0 +1,6 @@
+# (선택) 로컬 고정밀 보컬 싱크용 — 강제정렬 stable-ts + torch
+# 설치: pip install -r requirements-align.txt
+#   torch는 CPU판 권장: pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 미설치 시 앱은 자동으로 LRCLIB 동기가사 + Whisper 근사 정렬로 폴백한다.
+stable-ts==2.19.1
+torch>=2.2

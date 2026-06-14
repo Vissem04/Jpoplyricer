@@ -26,9 +26,12 @@ def _parse_lrc(synced: str) -> list[tuple[float, str]]:
     return out
 
 
-def fetch_synced(title: str, artist: str, duration: float = 0) -> list[tuple[float, str]] | None:
+def fetch_synced(title: str, artist: str, duration: float = 0,
+                 tolerance: float = DUR_TOLERANCE) -> list[tuple[float, str]] | None:
     """제목/아티스트(+곡 길이)로 동기가사를 찾는다.
 
+    tolerance: 곡 길이 허용 오차(초). 이보다 더 차이 나는 버전은 타이밍이 어긋날 수
+        있으므로 신뢰하지 않는다. (보컬 곡은 작게, 보컬 없는 MR은 크게 줘서 호출)
     반환: [(시작초, 가사줄)] (간주 등 빈 줄 제외) 또는 None.
     """
     title = (title or "").strip()
@@ -51,7 +54,7 @@ def fetch_synced(title: str, artist: str, duration: float = 0) -> list[tuple[flo
     # 곡 길이가 가까운 버전 우선
     if duration:
         items.sort(key=lambda it: abs((it.get("duration") or 0) - duration))
-        if abs((items[0].get("duration") or 0) - duration) > DUR_TOLERANCE:
+        if abs((items[0].get("duration") or 0) - duration) > tolerance:
             # 길이가 너무 다른 버전뿐이면 신뢰하지 않음(타이밍 어긋남)
             return None
 

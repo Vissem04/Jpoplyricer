@@ -15,21 +15,28 @@ IDENTIFY_MODEL = os.getenv("OPENAI_IDENTIFY_MODEL", "gpt-4o")
 ANNOTATE_MODEL = os.getenv("OPENAI_ANNOTATE_MODEL", "gpt-4o-mini")
 WHISPER_MODEL = os.getenv("OPENAI_WHISPER_MODEL", "whisper-1")
 
-# 임시 오디오 파일 저장 위치
-TMP_DIR = ROOT_DIR / "tmp"
-TMP_DIR.mkdir(exist_ok=True)
+# 임시 오디오 파일 저장 위치 (배포 시 TMP_DIR 환경변수로 교체 가능)
+TMP_DIR = Path(os.getenv("TMP_DIR", str(ROOT_DIR / "tmp")))
+TMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# 저장된 노래(라이브러리) 영속 저장 위치
-DATA_DIR = ROOT_DIR / "data"
+# 저장된 노래(라이브러리) 영속 저장 위치 (배포 시 DATA_DIR 환경변수로 영속 볼륨 지정)
+DATA_DIR = Path(os.getenv("DATA_DIR", str(ROOT_DIR / "data")))
 AUDIO_DIR = DATA_DIR / "audio"
 LIBRARY_FILE = DATA_DIR / "library.json"
-DATA_DIR.mkdir(exist_ok=True)
-AUDIO_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- 인증/관리자 ---
 USERS_FILE = DATA_DIR / "users.json"
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+# HTTPS 배포 시 세션 쿠키에 Secure 플래그(평문 HTTP 전송 차단).
+# 로컬(http://127.0.0.1)에서는 0, 운영(HTTPS)에서는 1 로 둔다.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0").lower() in ("1", "true", "yes")
+
+# 약한 기본 관리자 비밀번호(부트스트랩 방지용 거부 목록)
+WEAK_ADMIN_PASSWORDS = {"", "change-this-strong-password", "admin", "password", "1234"}
 
 
 def get_session_secret() -> bytes:

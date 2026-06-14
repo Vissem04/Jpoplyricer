@@ -1,0 +1,18 @@
+# 비밀/데이터 — 이미지에 절대 포함 금지
+.env
+data/
+tmp/
+
+# 파이썬/가상환경/캐시
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# git / 문서 / 보조 파일
+.git/
+.gitignore
+*.md
+run.ps1
+requirements-align.txt
+.DS_Store

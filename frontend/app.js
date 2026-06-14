@@ -456,7 +456,7 @@ function renderResult(data) {
   editMode = false;
   lyricsToolbar.classList.toggle("hidden", data.lines.length === 0);
   copyFeedback.textContent = "";
-  lineStarts = data.lines.map((ln) => (typeof ln.start === "number" ? ln.start : null));
+  lineStarts = makeIncreasing(data.lines.map((ln) => ln.start));
   renderLyricsNormal();
 
   resultEl.classList.remove("hidden");
@@ -551,17 +551,43 @@ async function saveEdits() {
   }
 }
 
+// 반복 가사 등으로 시작시간이 같거나 역행하면 카라오케가 다음 줄로 못 넘어간다.
+// -> 각 줄이 '구별되는, 증가하는' 시작시간을 갖도록 보정한다.
+//    같은 값이 연속되면 다음 더 큰 값(또는 끝)까지 균등 분배한다.
+function makeIncreasing(rawStarts) {
+  const n = rawStarts.length;
+  const s = rawStarts.map((x) => (typeof x === "number" && !isNaN(x) ? x : null));
+  for (let i = 0; i < n; i++) {
+    if (s[i] == null) s[i] = i === 0 ? 0 : s[i - 1];
+  }
+  let i = 1;
+  while (i < n) {
+    if (s[i] > s[i - 1]) { i++; continue; }
+    // i 부터 시작시간이 증가하지 않음 -> 다음으로 더 큰 값(s[j])을 찾아 그 사이를 균등 분배
+    let j = i;
+    while (j < n && s[j] <= s[i - 1]) j++;
+    const lo = s[i - 1];
+    const hi = j < n ? s[j] : lo + (j - (i - 1)) * 1.2;
+    const span = hi > lo ? hi - lo : (j - (i - 1)) * 0.5;
+    const step = span / (j - (i - 1));
+    for (let k = i; k < j; k++) {
+      s[k] = +(lo + step * (k - (i - 1))).toFixed(2);
+    }
+    i = j < n ? j + 1 : j;
+  }
+  return s;
+}
+
 // --- 노래방 싱크 ---
 audioEl.addEventListener("timeupdate", () => {
   if (!karaokeToggle.checked || lineStarts.length === 0) return;
   const t = audioEl.currentTime;
 
-  // 현재 시각 이하인 마지막 줄을 찾는다 (오프셋 반영)
+  // 현재 시각 이하인 '마지막' 줄을 찾는다(오프셋 반영). 전체를 훑어 순서 꼬임에도 견고.
   let idx = -1;
   for (let i = 0; i < lineStarts.length; i++) {
     const s = effectiveStart(i);
     if (s != null && s <= t) idx = i;
-    else if (s != null && s > t) break;
   }
 
   if (idx !== activeIdx) {

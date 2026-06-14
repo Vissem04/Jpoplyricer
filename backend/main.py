@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import ROOT_DIR, TMP_DIR, require_keys
+from .config import COOKIE_SECURE, ROOT_DIR, TMP_DIR, require_keys
 from .services import (
     align,
     annotate,
@@ -128,6 +128,34 @@ def _map_lrc_times(annotated: list[dict], lrc: list[tuple]) -> list[float] | Non
         res[i] = round(lt + (i - li) * 2.0, 2)
     return res
 
+
+def _ensure_increasing(starts: list) -> list[float]:
+    """반복 가사 등으로 시작시간이 같거나 역행하면, 다음 더 큰 값(또는 끝)까지 균등
+    분배해 각 줄이 '구별되는, 증가하는' 시작시간을 갖게 한다(노래방 하이라이트 멈춤 방지).
+    """
+    n = len(starts)
+    s = [float(x) if isinstance(x, (int, float)) else None for x in starts]
+    for i in range(n):
+        if s[i] is None:
+            s[i] = 0.0 if i == 0 else s[i - 1]
+    i = 1
+    while i < n:
+        if s[i] > s[i - 1]:
+            i += 1
+            continue
+        j = i
+        while j < n and s[j] <= s[i - 1]:
+            j += 1
+        lo = s[i - 1]
+        hi = s[j] if j < n else lo + (j - (i - 1)) * 1.2
+        span = (hi - lo) if hi > lo else (j - (i - 1)) * 0.5
+        step = span / (j - (i - 1))
+        for k in range(i, j):
+            s[k] = round(lo + step * (k - (i - 1)), 2)
+        i = j + 1 if j < n else j
+    return s
+
+
 app = FastAPI(title="J-POP 가사 독음/해석 + 노래방")
 
 FRONTEND_DIR = ROOT_DIR / "frontend"
@@ -183,7 +211,7 @@ def login(body: AuthBody, response: Response):
     token = auth.create_session_token(user["username"])
     response.set_cookie(
         auth.COOKIE_NAME, token, httponly=True, samesite="lax",
-        max_age=auth.SESSION_TTL, path="/",
+        secure=COOKIE_SECURE, max_age=auth.SESSION_TTL, path="/",
     )
     return auth.public_user(user)
 
@@ -302,33 +330,44 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
         starts = None
         sync_method = None
 
-        def _lrc_starts():
-            """LRCLIB 동기가사로 줄별 타이밍을 얻는다(곡 일치 검증 후). 실패 시 None."""
+        def _lrc_starts(tolerance: float, sim_min: float = 0.5):
+            """LRCLIB 동기가사로 줄별 타이밍을 얻는다(곡 일치 검증 후). 실패 시 None.
+
+            tolerance: 오디오 길이가 LRC 버전과 이 이내로 가까울 때만 사용(버전 어긋남 방지).
+            """
             try:
-                lrc = lrclib.fetch_synced(lyrics_result["title"], lyrics_result["artist"], dur)
+                lrc = lrclib.fetch_synced(
+                    lyrics_result["title"], lyrics_result["artist"], dur, tolerance=tolerance
+                )
             except Exception:
                 return None
             if not lrc:
                 return None
             lrc_text = "\n".join(t for _, t in lrc)
-            if genius.text_similarity(lrc_text, lyrics_result["lyrics"]) < 0.5:
+            if genius.text_similarity(lrc_text, lyrics_result["lyrics"]) < sim_min:
                 return None  # 다른 곡/버전이면 사용 안 함
             return _map_lrc_times(annotated, lrc)
 
         if verified:
-            # 보컬이 있는 곡(MV·원곡 음원): '그 오디오 자체'에 정렬하는 게 가장 안전하다.
-            #   편곡/인트로/간주가 달라도 이 오디오 기준이라 중간에 어긋나지 않는다.
-            #   외부 동기가사(LRC)는 다른 버전 타이밍이라 위험 -> 보컬 곡엔 쓰지 않는다.
-            starts = forced_align.align_lines(audio_path, originals)
-            sync_method = "forced"
-            if starts is None:
-                # 강제정렬 실패 시에도 '이 오디오'의 Whisper 구간 기반 근사(오디오 그라운드).
-                starts = align.align_lines(originals, trans["segments"])
-                sync_method = "approx"
+            # 보컬이 있는 곡(MV·원곡 음원):
+            #   오디오 길이가 LRC 원곡과 '거의 같으면'(같은 버전) LRC의 절대 타임이 가장 정확.
+            #   -> 이때만 LRC 우선(좁은 허용오차). 길이가 다르면(편곡/MV) 위험하므로
+            #      그 오디오 자체에 직접 정렬(forced_align)로 처리해 중간 어긋남을 막는다.
+            starts = _lrc_starts(tolerance=9, sim_min=0.55)
+            if starts is not None:
+                sync_method = "lrc"
+            else:
+                starts = forced_align.align_lines(audio_path, originals)
+                sync_method = "forced"
+                if starts is None:
+                    # 강제정렬 실패 시 '이 오디오'의 Whisper 구간 기반 근사(오디오 그라운드).
+                    starts = align.align_lines(originals, trans["segments"])
+                    sync_method = "approx"
         else:
             # 보컬이 없는 반주(MR)/연주 트랙: 맞출 보컬이 없으므로 외부 동기가사(LRC)가
-            #   유일한 '실제 곡 타이밍' 소스. (인트로 길이 차이는 슬라이더로 보정 가능)
-            starts = _lrc_starts()
+            #   유일한 '실제 곡 타이밍' 소스. 대안이 없으므로 길이 허용오차를 넉넉히 둔다.
+            #   (인트로 길이 차이는 슬라이더로 보정 가능)
+            starts = _lrc_starts(tolerance=25, sim_min=0.5)
             if starts is not None:
                 sync_method = "lrc"
             else:
@@ -336,6 +375,8 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
                 n = max(1, len(originals))
                 starts = [round(dur * i / n, 2) for i in range(n)] if dur else [0.0] * n
                 sync_method = "even"
+        # 반복 가사 등으로 같은/역행 타임이 생기면 증가하도록 보정(하이라이트 멈춤 방지)
+        starts = _ensure_increasing(starts)
         for ln, start in zip(annotated, starts):
             ln["start"] = start
 
@@ -378,7 +419,10 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"처리 중 오류: {e}")
+        # 내부 예외 상세(스택/경로 등)는 서버 로그로만 남기고, 사용자에겐 일반 메시지.
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
 
 
 @app.get("/api/audio/{audio_id}")
