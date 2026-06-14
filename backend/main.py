@@ -348,33 +348,25 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
                 return None  # 다른 곡/버전이면 사용 안 함
             return _map_lrc_times(annotated, lrc)
 
-        if verified:
-            # 보컬이 있는 곡(MV·원곡 음원):
-            #   오디오 길이가 LRC 원곡과 '거의 같으면'(같은 버전) LRC의 절대 타임이 가장 정확.
-            #   -> 이때만 LRC 우선(좁은 허용오차). 길이가 다르면(편곡/MV) 위험하므로
-            #      그 오디오 자체에 직접 정렬(forced_align)로 처리해 중간 어긋남을 막는다.
-            starts = _lrc_starts(tolerance=9, sim_min=0.55)
-            if starts is not None:
-                sync_method = "lrc"
-            else:
-                starts = forced_align.align_lines(audio_path, originals)
-                sync_method = "forced"
-                if starts is None:
-                    # 강제정렬 실패 시 '이 오디오'의 Whisper 구간 기반 근사(오디오 그라운드).
-                    starts = align.align_lines(originals, trans["segments"])
-                    sync_method = "approx"
+        # 1순위: LRCLIB 동기가사 — 실제 줄별 '절대' 타임스탬프라 긴 인트로·간주가
+        #   그대로 반영된다(균등분배의 드리프트 문제를 근본 해결). 곡이 맞는지 텍스트
+        #   유사도로 검증하고, 길이가 가까운 버전을 고른다. 길이가 좀 달라도(편곡/MV)
+        #   대개 '일정한' 오프셋 차이라 슬라이더로 보정 가능하므로 허용오차를 넉넉히 둔다.
+        starts = _lrc_starts(tolerance=30, sim_min=0.5)
+        if starts is not None:
+            sync_method = "lrc"
+        elif verified:
+            # LRC 없음 + 보컬 있음: 이 오디오 자체에 정렬(강제정렬 -> Whisper 근사).
+            starts = forced_align.align_lines(audio_path, originals)
+            sync_method = "forced"
+            if starts is None:
+                starts = align.align_lines(originals, trans["segments"])
+                sync_method = "approx"
         else:
-            # 보컬이 없는 반주(MR)/연주 트랙: 맞출 보컬이 없으므로 외부 동기가사(LRC)가
-            #   유일한 '실제 곡 타이밍' 소스. 대안이 없으므로 길이 허용오차를 넉넉히 둔다.
-            #   (인트로 길이 차이는 슬라이더로 보정 가능)
-            starts = _lrc_starts(tolerance=25, sim_min=0.5)
-            if starts is not None:
-                sync_method = "lrc"
-            else:
-                # LRC도 없으면 균등 분배(대략치) — 미세조정 슬라이더로 보정.
-                n = max(1, len(originals))
-                starts = [round(dur * i / n, 2) for i in range(n)] if dur else [0.0] * n
-                sync_method = "even"
+            # LRC 없음 + 보컬 없음(MR): 최후수단으로 균등 분배(슬라이더로 보정).
+            n = max(1, len(originals))
+            starts = [round(dur * i / n, 2) for i in range(n)] if dur else [0.0] * n
+            sync_method = "even"
         # 반복 가사 등으로 같은/역행 타임이 생기면 증가하도록 보정(하이라이트 멈춤 방지)
         starts = _ensure_increasing(starts)
         for ln, start in zip(annotated, starts):
