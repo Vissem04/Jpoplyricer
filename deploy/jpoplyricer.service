@@ -1,0 +1,17 @@
+[Unit]
+Description=Jpoplyricer (J-POP 가사 독음·해석)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# 사용자/경로는 본인 환경에 맞게 수정 (기본 라즈베리파이 사용자 예: pi)
+User=pi
+WorkingDirectory=/home/pi/Jpoplyricer
+Environment=PYTHONIOENCODING=utf-8
+# .env 파일에서 키/관리자 설정을 읽음
+ExecStart=/home/pi/Jpoplyricer/.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
