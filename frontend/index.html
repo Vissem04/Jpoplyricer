@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>J-POP 가사 · 독음 · 해석</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- 상단 우측: 사용자 바 -->
+  <div id="topBar" class="top-bar hidden">
+    <button id="libraryBtn" class="top-btn" title="저장된 노래">📚 저장된 노래</button>
+    <button id="adminBtn" class="top-btn hidden" title="관리자">🛠 관리자</button>
+    <span id="userLabel" class="user-label"></span>
+    <button id="logoutBtn" class="top-btn" title="로그아웃">로그아웃</button>
+  </div>
+
+  <!-- 로그인 / 회원가입 -->
+  <div id="authOverlay" class="auth-overlay hidden">
+    <div class="auth-card">
+      <h1 class="auth-title">🎵 J-POP 가사 독음·해석</h1>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login">로그인</button>
+        <button class="auth-tab" data-tab="register">회원가입</button>
+      </div>
+      <form id="loginForm" class="auth-form">
+        <input id="loginUser" type="text" placeholder="아이디" autocomplete="username" required />
+        <input id="loginPass" type="password" placeholder="비밀번호" autocomplete="current-password" required />
+        <button type="submit">로그인</button>
+      </form>
+      <form id="registerForm" class="auth-form hidden">
+        <input id="regUser" type="text" placeholder="아이디 (2자 이상)" autocomplete="username" required />
+        <input id="regPass" type="password" placeholder="비밀번호 (4자 이상)" autocomplete="new-password" required />
+        <button type="submit">가입 신청</button>
+        <p class="auth-note">가입 후 관리자 승인이 있어야 이용할 수 있어요.</p>
+      </form>
+      <div id="authMsg" class="auth-msg"></div>
+    </div>
+  </div>
+
+  <!-- 승인 대기 -->
+  <div id="pendingOverlay" class="auth-overlay hidden">
+    <div class="auth-card">
+      <div class="pending-icon">⏳</div>
+      <h2 id="pendingTitle">관리자 승인 대기 중</h2>
+      <p id="pendingDesc" class="auth-note">관리자가 승인하면 바로 이용할 수 있어요. 잠시 후 다시 시도해 주세요.</p>
+      <div class="pending-actions">
+        <button id="pendingRefresh" class="top-btn">새로고침</button>
+        <button id="pendingLogout" class="top-btn">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
+  <main id="appMain" class="hidden">
+    <header>
+      <h1>🎵 J-POP 가사 독음 · 해석기</h1>
+      <p class="sub">일본 노래 유튜브 링크를 붙여넣으면 가사 · 한국어 독음 · 해석을 한 번에 보여줘요.</p>
+    </header>
+
+    <form id="form">
+      <input
+        id="url"
+        type="url"
+        placeholder="https://www.youtube.com/watch?v=..."
+        required
+      />
+      <button id="submit" type="submit">변환</button>
+    </form>
+
+    <div id="status" class="status hidden"></div>
+
+    <section id="result" class="hidden">
+      <div id="meta" class="meta"></div>
+
+      <div id="player" class="player hidden">
+        <audio id="audio" preload="auto"></audio>
+        <div class="aplayer">
+          <button type="button" id="playBtn" class="aplayer-play" aria-label="재생/일시정지">▶</button>
+          <span id="curTime" class="aplayer-time">0:00</span>
+          <input type="range" id="seekBar" class="aplayer-range aplayer-seek" min="0" max="100" step="0.1" value="0" />
+          <span id="durTime" class="aplayer-time">0:00</span>
+          <button type="button" id="muteBtn" class="aplayer-icon" aria-label="음소거">🔊</button>
+          <input type="range" id="volBar" class="aplayer-range aplayer-vol" min="0" max="1" step="0.01" value="1" />
+        </div>
+        <label class="karaoke-toggle">
+          <input type="checkbox" id="karaokeMode" checked />
+          노래방 모드 (재생 위치에 맞춰 가사 하이라이트·자동 스크롤)
+        </label>
+
+        <div class="offset-control">
+          <span class="offset-label">싱크 미세조정</span>
+          <button type="button" class="offset-btn" id="offsetMinus">−0.1s</button>
+          <input type="range" id="offsetRange" min="-5" max="5" step="0.1" value="0" />
+          <button type="button" class="offset-btn" id="offsetPlus">+0.1s</button>
+          <span class="offset-value" id="offsetValue">0.0s</span>
+          <button type="button" class="offset-btn" id="offsetAuto" title="onset 분석으로 자동 보정">자동</button>
+          <button type="button" class="offset-btn reset" id="offsetReset">초기화</button>
+        </div>
+        <div class="offset-hint" id="offsetHint">가사가 음악보다 빠르면 +쪽, 느리면 −쪽으로 조정하세요.</div>
+      </div>
+
+      <div id="lyricsToolbar" class="lyrics-toolbar hidden">
+        <span class="toolbar-label">복사</span>
+        <div class="seg-toggle" id="copyModeToggle" role="group" aria-label="복사 범위">
+          <button type="button" class="seg-btn active" data-copy="all">전체</button>
+          <button type="button" class="seg-btn" data-copy="original">원문</button>
+          <button type="button" class="seg-btn" data-copy="reading">독음</button>
+          <button type="button" class="seg-btn" data-copy="translation">해석</button>
+        </div>
+        <button type="button" id="copyBtn" class="copy-btn">📋 복사</button>
+        <span class="copy-feedback" id="copyFeedback"></span>
+        <span class="toolbar-spacer"></span>
+        <button type="button" id="lyricsOnlyBtn" class="copy-btn">📄 가사만 보기</button>
+        <button type="button" id="editBtn" class="copy-btn edit-btn">✏️ 가사 수정</button>
+      </div>
+
+      <div id="editToolbar" class="edit-toolbar hidden">
+        <span class="edit-hint">각 줄의 원문·독음·해석을 직접 고칠 수 있어요 (타이밍은 유지됨).</span>
+        <button type="button" id="editSaveBtn" class="copy-btn save">💾 저장</button>
+        <button type="button" id="editCancelBtn" class="copy-btn">취소</button>
+      </div>
+
+      <div id="lyrics"></div>
+    </section>
+  </main>
+
+  <!-- 저장된 노래 패널 -->
+  <div id="libraryOverlay" class="library-overlay hidden">
+    <aside id="libraryPanel" class="library-panel">
+      <div class="library-header">
+        <h2>📚 저장된 노래</h2>
+        <div class="library-header-actions">
+          <button id="libraryClearAll" class="library-clear" title="전체 삭제">전체 삭제</button>
+          <button id="libraryClose" class="library-close" title="닫기">✕</button>
+        </div>
+      </div>
+      <div id="libraryList" class="library-list"></div>
+    </aside>
+  </div>
+
+  <!-- 관리자 패널 -->
+  <div id="adminOverlay" class="library-overlay hidden">
+    <aside class="library-panel">
+      <div class="library-header">
+        <h2>🛠 사용자 관리</h2>
+        <button id="adminClose" class="library-close" title="닫기">✕</button>
+      </div>
+      <div id="adminList" class="library-list"></div>
+    </aside>
+  </div>
+
+  <button id="scrollTopBtn" class="scroll-top hidden" title="맨 위로" aria-label="맨 위로">↑</button>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

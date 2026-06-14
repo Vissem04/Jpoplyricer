@@ -1,0 +1,21 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-dotenv==1.0.1
+openai==1.59.6
+lyricsgenius==3.0.1
+yt-dlp==2024.12.13
+pydantic==2.10.4
+beautifulsoup4==4.12.3
+requests==2.32.3
+
+# 로컬 강제정렬(노래방 싱크). torch는 CPU판 권장:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+stable-ts==2.19.1
+torch>=2.2
+
+# 일본어 -> 한글 독음 변환
+#   fugashi(+unidic): 형태소 분석으로 조사 は->わ 등 문법·문맥 한자 읽기 정확
+#   pykakasi: 보조(잔여 한자 히라가나화)
+fugashi==1.5.2
+unidic-lite==1.0.8
+pykakasi==2.3.0
