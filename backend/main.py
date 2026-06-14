@@ -318,55 +318,52 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
             or 0.0
         )
 
-        # 5) 줄별 독음 + 해석
-        annotated = annotate.annotate_lyrics(lyrics_result["lyrics"])
-
-        # 6) 노래방 싱크
-        #   1순위: LRCLIB 동기가사 — 실제 곡의 줄별 타임스탬프(보컬 없는 MR도 정확)
-        #   2순위: 로컬 강제정렬(stable-ts) — 가사를 오디오에 직접 정렬
-        #   폴백: Whisper 구간 + GPT 정렬 / 균등 분배
-        originals = [ln["original"] for ln in annotated]
+        # 5) 가사 텍스트 + 노래방 싱크 결정
+        #   LRCLIB 동기가사가 곡과 일치하면, 그 '줄'을 가사로 사용한다.
+        #   -> 텍스트와 타임스탬프가 1:1로 완벽히 일치하고, 출처마다 줄이 달라 생기는
+        #      군더더기(가사가 아닌 줄)와 싱크 어긋남을 동시에 막는다.
+        #      또 LRC 절대 타임이라 긴 인트로·간주도 정확(드리프트 없음).
         dur = youtube.get_duration(audio_path)
-        starts = None
-        sync_method = None
+        lrc = None
+        try:
+            cand_lrc = lrclib.fetch_synced(
+                lyrics_result["title"], lyrics_result["artist"], dur, tolerance=30
+            )
+        except Exception:
+            cand_lrc = None
+        if cand_lrc:
+            lrc_text = "\n".join(t for _, t in cand_lrc)
+            # 곡이 맞는지 교차검증 가사와 텍스트 유사도로 확인(다른 곡/버전 방지)
+            if genius.text_similarity(lrc_text, lyrics_result["lyrics"]) >= 0.5:
+                lrc = cand_lrc
 
-        def _lrc_starts(tolerance: float, sim_min: float = 0.5):
-            """LRCLIB 동기가사로 줄별 타이밍을 얻는다(곡 일치 검증 후). 실패 시 None.
-
-            tolerance: 오디오 길이가 LRC 버전과 이 이내로 가까울 때만 사용(버전 어긋남 방지).
-            """
-            try:
-                lrc = lrclib.fetch_synced(
-                    lyrics_result["title"], lyrics_result["artist"], dur, tolerance=tolerance
-                )
-            except Exception:
-                return None
-            if not lrc:
-                return None
-            lrc_text = "\n".join(t for _, t in lrc)
-            if genius.text_similarity(lrc_text, lyrics_result["lyrics"]) < sim_min:
-                return None  # 다른 곡/버전이면 사용 안 함
-            return _map_lrc_times(annotated, lrc)
-
-        # 1순위: LRCLIB 동기가사 — 실제 줄별 '절대' 타임스탬프라 긴 인트로·간주가
-        #   그대로 반영된다(균등분배의 드리프트 문제를 근본 해결). 곡이 맞는지 텍스트
-        #   유사도로 검증하고, 길이가 가까운 버전을 고른다. 길이가 좀 달라도(편곡/MV)
-        #   대개 '일정한' 오프셋 차이라 슬라이더로 보정 가능하므로 허용오차를 넉넉히 둔다.
-        starts = _lrc_starts(tolerance=30, sim_min=0.5)
-        if starts is not None:
-            sync_method = "lrc"
-        elif verified:
-            # LRC 없음 + 보컬 있음: 이 오디오 자체에 정렬(강제정렬 -> Whisper 근사).
-            starts = forced_align.align_lines(audio_path, originals)
-            sync_method = "forced"
+        if lrc:
+            # LRC 줄을 가사로 사용 + 절대 타임으로 싱크
+            annotated = annotate.annotate_lyrics("\n".join(t for _, t in lrc))
+            starts = _map_lrc_times(annotated, lrc)
             if starts is None:
-                starts = align.align_lines(originals, trans["segments"])
-                sync_method = "approx"
+                # annotate가 LRC 줄을 거의 그대로 반환하므로 인덱스 매핑 폴백
+                lt = [t for t, _ in lrc]
+                starts = [lt[i] if i < len(lt) else (lt[-1] if lt else 0.0)
+                          for i in range(len(annotated))]
+            sync_method = "lrc"
         else:
-            # LRC 없음 + 보컬 없음(MR): 최후수단으로 균등 분배(슬라이더로 보정).
-            n = max(1, len(originals))
-            starts = [round(dur * i / n, 2) for i in range(n)] if dur else [0.0] * n
-            sync_method = "even"
+            # LRC 없음: 교차검증 텍스트로 진행
+            annotated = annotate.annotate_lyrics(lyrics_result["lyrics"])
+            originals = [ln["original"] for ln in annotated]
+            if verified:
+                # 보컬 있음: 이 오디오 자체에 정렬(강제정렬 -> Whisper 근사).
+                starts = forced_align.align_lines(audio_path, originals)
+                sync_method = "forced"
+                if starts is None:
+                    starts = align.align_lines(originals, trans["segments"])
+                    sync_method = "approx"
+            else:
+                # 보컬 없음(MR): 최후수단으로 균등 분배(슬라이더로 보정).
+                n = max(1, len(originals))
+                starts = [round(dur * i / n, 2) for i in range(n)] if dur else [0.0] * n
+                sync_method = "even"
+
         # 반복 가사 등으로 같은/역행 타임이 생기면 증가하도록 보정(하이라이트 멈춤 방지)
         starts = _ensure_increasing(starts)
         for ln, start in zip(annotated, starts):
