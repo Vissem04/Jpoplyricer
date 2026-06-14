@@ -41,8 +41,12 @@ def _base_opts() -> list[str]:
         "--no-playlist",
         "--no-warnings",
         "--retries", "3",
-        "--extractor-args", "youtube:player_client=android,web",
     ]
+    # 클라이언트 우회 옵션은 환경변수로 조정 가능(기본은 yt-dlp 최신 기본값 사용).
+    #   예: YTDLP_PLAYER_CLIENT="web_safari,tv"  /  비우면 미지정.
+    pc = os.getenv("YTDLP_PLAYER_CLIENT", "")
+    if pc:
+        opts += ["--extractor-args", f"youtube:player_client={pc}"]
     proxy = os.getenv("YTDLP_PROXY", "")
     if proxy:
         opts += ["--proxy", proxy]
