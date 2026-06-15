@@ -345,12 +345,23 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
         #   2순위: LRC 동기가사 타임(보컬 없는 MR 등 word-align 실패 시).
         #   3순위: 로컬 강제정렬(torch 있을 때) / Whisper 구간 근사.
         #   최후: 균등 분배.
-        starts = word_align.align_lines(originals, trans.get("words") or [])
-        sync_method = "word"
-        if starts is None and lrc:
-            starts = _map_lrc_times(annotated, lrc)
-            sync_method = "lrc"
-        if starts is None:
+        wa = word_align.align_lines(originals, trans.get("words") or [])
+        lrc_times = _map_lrc_times(annotated, lrc) if lrc else None
+
+        if lrc_times is not None and wa is not None and len(wa) == len(lrc_times):
+            # 결합: LRC의 정확한 '상대 구조'(반복 후렴·2절을 완벽히 처리, 사람이 동기화)
+            #   + word-align로 잰 '전역 오프셋'(이 영상 오디오에 맞춤).
+            #   -> 단어정렬이 반복 구간에서 잘못 붙는 문제 없이, 이 오디오에 정확히 정렬.
+            sd = sorted(a - l for a, l in zip(wa, lrc_times))
+            off = sd[len(sd) // 2]  # median offset (이상치에 강함)
+            starts = [round(l + off, 2) for l in lrc_times]
+            sync_method = "synced"
+        elif wa is not None:
+            # LRC 없음: 그 오디오의 단어 타임에 직접 정렬
+            starts, sync_method = wa, "word"
+        elif lrc_times is not None:
+            starts, sync_method = lrc_times, "lrc"
+        else:
             forced = forced_align.align_lines(audio_path, originals)
             if forced is not None:
                 starts, sync_method = forced, "forced"
