@@ -21,6 +21,7 @@ from .services import (
     tjkaraoke,
     transcribe,
     utanet,
+    word_align,
     youtube,
 )
 
@@ -318,11 +319,9 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
             or 0.0
         )
 
-        # 5) 가사 텍스트 + 노래방 싱크 결정
-        #   LRCLIB 동기가사가 곡과 일치하면, 그 '줄'을 가사로 사용한다.
-        #   -> 텍스트와 타임스탬프가 1:1로 완벽히 일치하고, 출처마다 줄이 달라 생기는
-        #      군더더기(가사가 아닌 줄)와 싱크 어긋남을 동시에 막는다.
-        #      또 LRC 절대 타임이라 긴 인트로·간주도 정확(드리프트 없음).
+        # 5) 가사 텍스트 결정
+        #   LRCLIB 동기가사가 곡과 일치하면 그 '줄'을 가사로 사용(군더더기 없는 깨끗한 텍스트).
+        #   아니면 교차검증(Genius/Uta-Net) 텍스트.
         dur = youtube.get_duration(audio_path)
         lrc = None
         try:
@@ -331,35 +330,34 @@ def process(req: ProcessRequest, user=Depends(auth.require_approved)):
             )
         except Exception:
             cand_lrc = None
-        if cand_lrc:
-            lrc_text = "\n".join(t for _, t in cand_lrc)
-            # 곡이 맞는지 교차검증 가사와 텍스트 유사도로 확인(다른 곡/버전 방지)
-            if genius.text_similarity(lrc_text, lyrics_result["lyrics"]) >= 0.5:
-                lrc = cand_lrc
+        if cand_lrc and genius.text_similarity(
+            "\n".join(t for _, t in cand_lrc), lyrics_result["lyrics"]
+        ) >= 0.5:
+            lrc = cand_lrc
 
-        if lrc:
-            # LRC 줄을 가사로 사용 + 절대 타임으로 싱크
-            annotated = annotate.annotate_lyrics("\n".join(t for _, t in lrc))
+        lyrics_text = "\n".join(t for _, t in lrc) if lrc else lyrics_result["lyrics"]
+        annotated = annotate.annotate_lyrics(lyrics_text)
+        originals = [ln["original"] for ln in annotated]
+
+        # 6) 노래방 싱크 — 우선순위
+        #   1순위: word-align — 그 오디오의 Whisper '단어 타임'에 정식 가사를 정렬(오디오
+        #          그라운드). 버전/편곡/인트로 길이와 무관하게 실제 박자에 맞아 가장 정확.
+        #   2순위: LRC 동기가사 타임(보컬 없는 MR 등 word-align 실패 시).
+        #   3순위: 로컬 강제정렬(torch 있을 때) / Whisper 구간 근사.
+        #   최후: 균등 분배.
+        starts = word_align.align_lines(originals, trans.get("words") or [])
+        sync_method = "word"
+        if starts is None and lrc:
             starts = _map_lrc_times(annotated, lrc)
-            if starts is None:
-                # annotate가 LRC 줄을 거의 그대로 반환하므로 인덱스 매핑 폴백
-                lt = [t for t, _ in lrc]
-                starts = [lt[i] if i < len(lt) else (lt[-1] if lt else 0.0)
-                          for i in range(len(annotated))]
             sync_method = "lrc"
-        else:
-            # LRC 없음: 교차검증 텍스트로 진행
-            annotated = annotate.annotate_lyrics(lyrics_result["lyrics"])
-            originals = [ln["original"] for ln in annotated]
-            if verified:
-                # 보컬 있음: 이 오디오 자체에 정렬(강제정렬 -> Whisper 근사).
-                starts = forced_align.align_lines(audio_path, originals)
-                sync_method = "forced"
-                if starts is None:
-                    starts = align.align_lines(originals, trans["segments"])
-                    sync_method = "approx"
+        if starts is None:
+            forced = forced_align.align_lines(audio_path, originals)
+            if forced is not None:
+                starts, sync_method = forced, "forced"
+            elif verified:
+                starts = align.align_lines(originals, trans["segments"])
+                sync_method = "approx"
             else:
-                # 보컬 없음(MR): 최후수단으로 균등 분배(슬라이더로 보정).
                 n = max(1, len(originals))
                 starts = [round(dur * i / n, 2) for i in range(n)] if dur else [0.0] * n
                 sync_method = "even"

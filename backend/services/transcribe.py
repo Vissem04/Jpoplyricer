@@ -9,9 +9,10 @@ from ..config import OPENAI_API_KEY, WHISPER_MODEL
 def transcribe_audio(audio_path: Path) -> dict:
     """오디오에서 일본어 가사를 받아쓴다.
 
-    반환: {"text": 전체텍스트, "segments": [{"start": float, "end": float, "text": str}, ...]}
+    반환: {"text": 전체텍스트, "segments": [...], "words": [...]}
     - text: 제목/가수 추론용 힌트
-    - segments: 노래방 싱크용 구간 타임스탬프
+    - segments: [{"start","end","text"}] (구간)
+    - words:    [{"start","end","word"}] (단어 단위 — 노래방 싱크 정렬용)
     """
     client = OpenAI(api_key=OPENAI_API_KEY)
     with open(audio_path, "rb") as f:
@@ -20,22 +21,37 @@ def transcribe_audio(audio_path: Path) -> dict:
             file=f,
             language="ja",
             response_format="verbose_json",
-            timestamp_granularities=["segment"],
+            # 단어 단위 타임스탬프까지 요청(그 오디오의 실제 발화 시각 -> 정확한 싱크)
+            timestamp_granularities=["segment", "word"],
         )
 
     text = getattr(resp, "text", "") or ""
+
+    def _g(obj, key):
+        v = getattr(obj, key, None)
+        if v is None and isinstance(obj, dict):
+            v = obj.get(key)
+        return v
+
     segments = []
     for seg in getattr(resp, "segments", []) or []:
-        # SDK 객체/딕셔너리 모두 대응
-        start = getattr(seg, "start", None)
-        end = getattr(seg, "end", None)
-        seg_text = getattr(seg, "text", None)
-        if start is None and isinstance(seg, dict):
-            start, end, seg_text = seg.get("start"), seg.get("end"), seg.get("text")
         segments.append({
-            "start": float(start or 0.0),
-            "end": float(end or 0.0),
-            "text": (seg_text or "").strip(),
+            "start": float(_g(seg, "start") or 0.0),
+            "end": float(_g(seg, "end") or 0.0),
+            "text": (_g(seg, "text") or "").strip(),
         })
 
-    return {"text": text, "segments": segments}
+    words = []
+    for w in getattr(resp, "words", []) or []:
+        wt = (_g(w, "word") or "").strip()
+        if not wt:
+            continue
+        start = _g(w, "start")
+        end = _g(w, "end")
+        words.append({
+            "start": float(start or 0.0),
+            "end": float(end if end is not None else start or 0.0),
+            "word": wt,
+        })
+
+    return {"text": text, "segments": segments, "words": words}

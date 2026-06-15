@@ -391,7 +391,9 @@ function renderResult(data) {
   const srcName = g.name || "Genius";
   const conf = Math.round((data.identified?.confidence || 0) * 100);
   const sync =
-    data.sync_method === "lrc"
+    data.sync_method === "word"
+      ? '<span class="badge precise" title="이 음원의 음성 단어 타임스탬프에 가사를 정렬(가장 정확)">정밀 싱크 (음성정렬)</span>'
+      : data.sync_method === "lrc"
       ? '<span class="badge precise" title="동기가사(LRCLIB) 기반 정밀 싱크">정밀 싱크 (동기가사)</span>'
       : data.sync_method === "forced"
       ? '<span class="badge precise">정밀 싱크</span>'
